@@ -24,7 +24,7 @@ id' lexp@(Apply _ _) = lexp
 -------------------------------------------------------------------------------------------------------------------------
 -- Helper functions
 
--- Given a lambda expression, return a list of bound variables
+-- Given a lambda expression, return a list of bound variables names
 boundVarList :: Lexp -> [String]
 -- Base Case: A single variable is a free variable
 boundVarList v@(Atom _) = []
@@ -33,7 +33,7 @@ boundVarList lexp@(Lambda arg expr) = arg : (boundVarList expr)
 -- Recursive Step: Recursively call on both expressions and concatonate both lists together
 boundVarList lexp@(Apply expr1 expr2) = (boundVarList expr1) ++ (boundVarList expr2)
 
--- Given a lamdba expression, return a list of free variables
+-- Given a lamdba expression, return a list of free variables names
 freeVarList :: Lexp -> [String]
 -- Base Case: A single variable is a free variable
 freeVarList v@(Atom _) = [show v]
@@ -42,24 +42,42 @@ freeVarList lexp@(Lambda arg expr) = filter (/= arg) (freeVarList expr)
 -- Recursive Step: Recursively call on both expressions and concatonate both lists together
 freeVarList lexp@(Apply expr1 expr2) = (freeVarList expr1) ++ (freeVarList expr2)
 
--- Given a list of bound and free variables, return one variable named that is not being used
--- FIX INTERSECTION SUPPOSED TO BE OPPOSITE
-nameChangeVal :: [String] -> [String] -> String
-nameChangeVal boundVars freeVars = head ((alphabet) \\ (boundVars ++ freeVars))
+-- Given a lambda expression, return a list of all variable names
+varList :: Lexp -> [String]
+-- Base Case: A single variable
+varList v@(Atom _) = [show v]
+-- Recursive Step: Recursively call on expr and concatonate the result with arg
+varList lexp@(Lambda arg expr) = arg : (varList expr)
+-- Recursive Step: Recursively call on both expressions
+varList lexp@(Apply expr1 expr2) = (varList expr1) ++ (varList expr2)
+
+-- Given a list of bound and free variables, return one variable name that is not being used
+chooseName :: [String] -> [String] -> String
+-- List difference a predetermined list of names with the combined list of bound and free variables
+chooseName boundVars freeVars = head ((alphabet) \\ (boundVars ++ freeVars))
 								   where alphabet = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", 
 								                     "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"
 									                ] 
 
--- Given a lambda expression, rename bound variables with new name and return the newly named expression
-rename :: Lexp -> String -> String -> Lexp
--- Base Case: Only rename val if its equal to freeName
-rename v@(Atom val) freeName newName = if val == freeName then (Atom newName) 
-						       else (Atom val)
--- Recursive Step: Recursively call on expression and rename arg if its equal to freeName
-rename lexp@(Lambda arg expr) freeName newName = if arg == freeName then (Lambda newName (rename expr freeName newName))
-											      else (Lambda arg (rename expr freeName newName))
+-- Given a lambda expression, rename bound variables with new name if there is a conflicting free name and return the newly named lambda expression
+rename :: Lexp -> [String] -> [String] -> Lexp
+-- Base Case: Return the Lexp when there is no more free variables to refer to
+rename v@(Atom _) boundVars [] = v
+rename lexp@(Lambda _ _) boundVars [] = lexp
+rename lexp@(Apply _ _) boundVars [] = lexp
+
+-- Base Case|Recursive Step: Return the newly named Lexp if current name matches a free variable name
+--                           Recursively call on val with a truncated list of free variables	                         
+rename v@(Atom val) boundVars freeVars = if val == (head freeVars) then (Atom newName) 
+							                 else rename v boundVars (tail freeVars)
+							                 where newName = chooseName boundVars freeVars
+-- Recursive Step: Recursively call on expr and rename arg if its matches a free variable name
+rename lexp@(Lambda arg expr) boundVars freeVars = if arg == (head freeVars) then (Lambda newName (rename expr boundVars tailFreeVars))
+										               else (Lambda arg (rename expr boundVars tailFreeVars))
+										               where newName = chooseName boundVars freeVars
+										     	             tailFreeVars = freeVars
 -- Recursive Step: Recursively call on both expressions
-rename lexp@(Apply expr1 expr2) freeName newName = (Apply (rename expr1 freeName newName) (rename expr2 freeName newName))
+rename lexp@(Apply expr1 expr2) boundVars freeVars = (Apply (rename expr1 boundVars freeVars) (rename expr2 boundVars freeVars))
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Lambda calculus functions
@@ -68,13 +86,17 @@ rename lexp@(Apply expr1 expr2) freeName newName = (Apply (rename expr1 freeName
 alpha :: Lexp -> Lexp
 -- Base Case: A single variable is a free variable which does not require alpha renaming
 alpha v@(Atom _) = v
--- ?????? Base Case: Determine if expr1 bound variables need to be renamed based on the free variables in expr2
---alpha lexp@(Apply expr1 expr2) = (Apply (alpha (rename expr1 newName)) ( alpha expr2))
-		--Rename Lambda arg, expr1 (if/else)
-		--Recurse over expr1
 
--- Recursive Step: Recurively call on expr only because arg is a bound variable
-alpha lexp@(Lambda arg expr) = (Lambda arg (alpha expr))
+-- Recursive Step: Recursively call on expr only because arg is a bound variable
+alpha lexp@(Lambda arg expr) = if length (intersect boundVars freeVars) > 0 then (Lambda (show (rename (Atom arg) boundVars freeVars)) (alpha expr))
+							       else (Lambda arg (alpha expr))
+							       where boundVars = boundVarList (Atom arg)
+							             freeVars = varList expr
+-- Recursive Step: Recursively call on both expressions and only rename expr1 if bound variables in expr1 exist in variable of expr2
+alpha lexp@(Apply expr1 expr2) = if length (intersect boundVars freeVars) > 0 then (Apply (alpha (rename expr1 boundVars freeVars)) (alpha expr2))
+								     else (Apply (alpha expr1) (alpha expr2))
+								     where boundVars = boundVarList expr1	
+								           freeVars = varList expr2
 
 -- Beta reduce expressions using applicative order (inner most expression is evaluated first)
 beta :: Lexp -> Lexp
@@ -108,4 +130,4 @@ main = do
     -- id' simply returns its input, so runProgram will result
     -- in printing each lambda expression twice. 
     --runProgram filename id'
-    runProgram filename eta
+    runProgram filename alpha

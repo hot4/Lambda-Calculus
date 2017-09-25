@@ -59,14 +59,15 @@ chooseName boundVars freeVars = head ((alphabet) \\ (boundVars ++ freeVars))
 								                     "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"
 									                ] 
 
--- Given a lambda expression, rename bound variables with new name if there is a conflicting free name and return the newly named lambda expression
+-- Given a lambda expression, 
+--   if there is a conflicting free name rename bound variables with new name and return the newly named lambda expression
 rename :: Lexp -> [String] -> [String] -> Lexp
--- Base Case: Return the Lexp when there is no more free variables to refer to
+-- Base Case: Return the lambda expression when there is no more free variables to refer to
 rename v@(Atom _) boundVars [] = v
 rename lexp@(Lambda _ _) boundVars [] = lexp
 rename lexp@(Apply _ _) boundVars [] = lexp
 
--- Base Case|Recursive Step: Return the newly named Lexp if current name matches a free variable name
+-- Base Case|Recursive Step: Return the newly named lambda expression if current name matches a free variable name
 --                           Recursively call on val with a truncated list of free variables	                         
 rename v@(Atom val) boundVars freeVars = if val == (head freeVars) then (Atom newName) 
 							                 else rename v boundVars (tail freeVars)
@@ -79,6 +80,18 @@ rename lexp@(Lambda arg expr) boundVars freeVars = if arg == (head freeVars) the
 -- Recursive Step: Recursively call on both expressions
 rename lexp@(Apply expr1 expr2) boundVars freeVars = (Apply (rename expr1 boundVars freeVars) (rename expr2 boundVars freeVars))
 
+-- Given a variable to replace within a lambda expression, 
+--     return a lambda expression that replaces all instances of the argument
+--     within the application of the argument with the secondary lambda expression
+replace :: String -> Lexp -> Lexp -> Lexp
+-- Base Case: Return newExpr given the current atom matches the argument to replace else the orginal lambda expression
+replace arg v@(Atom _) newExpr = if ((Atom arg) == v) then newExpr
+	                                   else v
+-- Recursive Step: Recursively call on expr1 passing the arg to replace with newExpr if arg is found within expr1
+replace arg lexp@(Lambda val expr1) newExpr = (Lambda  val (replace arg expr1 newExpr))
+-- Recursive Step: Recursively call on both expressions
+replace arg lexp@(Apply expr1 expr2) newExpr = (Apply (replace arg expr1 newExpr) (replace arg expr2 newExpr))
+
 -------------------------------------------------------------------------------------------------------------------------
 -- Lambda calculus functions
 
@@ -88,11 +101,13 @@ alpha :: Lexp -> Lexp
 alpha v@(Atom _) = v
 
 -- Recursive Step: Recursively call on expr only because arg is a bound variable
+--                 and rename arg if it matches a free variable name
 alpha lexp@(Lambda arg expr) = if length (intersect boundVars freeVars) > 0 then (Lambda (show (rename (Atom arg) boundVars freeVars)) (alpha expr))
 							       else (Lambda arg (alpha expr))
 							       where boundVars = boundVarList (Atom arg)
 							             freeVars = varList expr
--- Recursive Step: Recursively call on both expressions and only rename expr1 if bound variables in expr1 exist in variable of expr2
+-- Recursive Step: Recursively call on both expressions 
+--                 and only rename expr1 if bound variables in expr1 exist in variable of expr2
 alpha lexp@(Apply expr1 expr2) = if length (intersect boundVars freeVars) > 0 then (Apply (alpha (rename expr1 boundVars freeVars)) (alpha expr2))
 								     else (Apply (alpha expr1) (alpha expr2))
 								     where boundVars = boundVarList expr1	
@@ -102,15 +117,17 @@ alpha lexp@(Apply expr1 expr2) = if length (intersect boundVars freeVars) > 0 th
 beta :: Lexp -> Lexp
 -- Base Case: Variable itself cannot be beta reduced
 beta v@(Atom _) = v
--- ?????? Base Case: Determine if all bound variables in expr1 can be replaced with expr2 
-beta lexp@(Apply (Lambda arg expr1) expr2) = lexp
+-- Base Case: If arg is found within expr1 then replace all instances with expr2 else return expr2
+beta lexp@(Apply lambdaExpr@(Lambda arg expr1) expr2) = if length (intersect [arg] boundVars) > 0 then replace arg expr1 expr2
+											                else expr2
+											                where boundVars = boundVarList lambdaExpr
 
 -- Recursive Step: Recursively call on expr only because arg is not beta reducable
 beta lexp@(Lambda arg expr) = (Lambda arg (beta expr))
 -- Recursive Step: Recursively call on both expressions
 beta lexp@(Apply expr1 expr2) = (Apply (beta expr1) (beta expr2))
 
--- Eta rcallocduce for Lamdba expressions taking the form: \x.(E x) --> E where E is some expression
+-- Eta reduce for Lamdba expressions taking the form: \x.(E x) --> E where E is some expression
 eta :: Lexp -> Lexp
 -- Base Case: A single variable cannot be eta reduced
 eta v@(Atom _) = v
@@ -123,6 +140,20 @@ eta lexp@(Lambda arg expr) = (Lambda arg (eta expr))
 -- Recursive Step: Recursively call on both expressions
 eta lexp@(Apply expr1 expr2) = (Apply (eta expr1) (eta expr2))
 
+---------------------------------------------------------------------------------------------------------------------------------------
+-- Master function to call
+
+-- Given a lambda expression, fully reduce the expression using alpha, beta, and eta logic
+reduce :: Lexp -> Lexp
+-- Base Case|Recursive Step: Given alpha, beta, and eta were applied to the lambda expression 
+--                               if the new lambda expression is the same as the current lambda expression 
+--                               then the lambda expression cannot be reduced any further
+--                           Recursively call on the newly reduced lambda expression	                         
+reduce expr = if (expr == newExpr) then expr
+	                    else reduce newExpr
+	                    where newExpr = eta (beta (alpha expr))
+
+---------------------------------------------------------------------------------------------------------------------------------------
 -- Entry point of program
 main = do
     args <- getArgs
@@ -130,4 +161,4 @@ main = do
     -- id' simply returns its input, so runProgram will result
     -- in printing each lambda expression twice. 
     --runProgram filename id'
-    runProgram filename alpha
+    runProgram filename reduce
